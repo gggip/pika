@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>比卡超成語大亂鬥 (雙人版)</title>
+    <title>比卡超成語大冒險</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -14,7 +14,7 @@
             overflow: hidden;
             touch-action: none;
             background-color: #f0fdf4;
-            user-select: none;
+            user-select: none; /* Prevent text selection */
         }
 
         #gameCanvas {
@@ -23,30 +23,59 @@
             height: 100%;
         }
 
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            z-index: 10;
+        }
+
+        .interactive-ui {
+            pointer-events: auto;
+        }
+
         .pixel-font {
             font-weight: 900;
             text-shadow: 2px 2px 0px #000;
         }
 
-        /* 簡單的撞擊特效 */
-        @keyframes bump {
-            0% { transform: scale(1); }
-            50% { transform: scale(0.8); }
-            100% { transform: scale(1); }
-        }
-        .bump-anim {
-            animation: bump 0.2s ease-out;
+        .shake-screen {
+            animation: shake 0.5s;
         }
 
-        .loading-dots:after {
-            content: '.';
-            animation: dots 1.5s steps(5, end) infinite;
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
         }
-        @keyframes dots {
-            0%, 20% { content: '.'; }
-            40% { content: '..'; }
-            60% { content: '...'; }
-            80%, 100% { content: ''; }
+
+        /* 收集冊卡片樣式 */
+        .collection-card {
+            transition: all 0.3s ease;
+        }
+        .collection-card.locked {
+            filter: grayscale(100%) brightness(0.5);
+            opacity: 0.7;
+        }
+        .collection-card.unlocked:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 閃爍特效 */
+        @keyframes shine {
+            0% { opacity: 0; transform: scale(0.5); }
+            50% { opacity: 1; transform: scale(1.2); }
+            100% { opacity: 0; transform: scale(1.5); }
+        }
+        .unlock-anim {
+            animation: shine 1s ease-out forwards;
         }
     </style>
 </head>
@@ -56,673 +85,711 @@
     <canvas id="gameCanvas"></canvas>
 
     <!-- UI Overlay (In Game) -->
-    <div id="gameUI" class="absolute inset-0 pointer-events-none hidden flex flex-col justify-between p-4 z-10">
-        <!-- Top Bar -->
-        <div class="flex justify-between items-start w-full">
-            <!-- P1 Score -->
-            <div class="bg-yellow-400 border-4 border-yellow-600 rounded-xl p-3 shadow-lg transform -rotate-2 relative">
-                <div class="absolute -top-3 -left-2 bg-white border-2 border-yellow-600 rounded-full p-1 w-8 h-8 flex items-center justify-center text-xs font-bold z-10">P1</div>
-                <p class="text-yellow-900 font-bold text-xs">比卡超</p>
-                <p id="p1Score" class="text-3xl text-white pixel-font text-center">0</p>
-            </div>
-
-            <!-- Question Box -->
-            <div class="bg-white/95 backdrop-blur border-4 border-blue-500 rounded-2xl px-4 py-2 shadow-xl text-center transform min-w-[200px]">
-                 <p class="text-gray-500 text-[10px] font-bold">請接住缺字！</p>
-                 <h1 id="idiomDisplay" class="text-3xl md:text-5xl font-black text-gray-800 tracking-widest whitespace-nowrap">
-                    等待中...
-                </h1>
+    <div id="uiLayer" class="ui-layer p-4 hidden">
+        <div class="flex justify-between items-start">
+            <div class="bg-yellow-400 border-4 border-blue-600 rounded-xl p-3 shadow-lg transform -rotate-2">
+                <p class="text-blue-900 font-bold text-xs md:text-sm">分數 SCORE</p>
+                <p id="scoreDisplay" class="text-2xl md:text-3xl text-white pixel-font">0</p>
             </div>
             
-            <!-- P2 Score -->
-            <div class="bg-purple-400 border-4 border-purple-600 rounded-xl p-3 shadow-lg transform rotate-2 relative">
-                 <div class="absolute -top-3 -right-2 bg-white border-2 border-purple-600 rounded-full p-1 w-8 h-8 flex items-center justify-center text-xs font-bold z-10">P2</div>
-                <p class="text-purple-900 font-bold text-xs">謎擬Q</p>
-                <p id="p2Score" class="text-3xl text-white pixel-font text-center">0</p>
+            <div class="flex flex-col items-end gap-2">
+                <div class="flex gap-1" id="livesDisplay">
+                    <span class="text-2xl md:text-3xl filter drop-shadow-md">❤️</span>
+                    <span class="text-2xl md:text-3xl filter drop-shadow-md">❤️</span>
+                    <span class="text-2xl md:text-3xl filter drop-shadow-md">❤️</span>
+                </div>
+                <div id="difficultyBadge" class="bg-white/80 px-2 py-1 rounded text-xs font-bold text-gray-500">
+                    難度: 簡單
+                </div>
             </div>
         </div>
 
-        <!-- Room Info (Bottom) -->
-        <div class="text-center">
-             <span class="bg-black/20 text-white px-3 py-1 rounded-full text-xs font-mono" id="roomCodeDisplay">ROOM: ----</span>
+        <!-- Question Box -->
+        <div class="absolute top-20 left-0 w-full flex justify-center pointer-events-none">
+            <div id="questionBox" class="bg-white/95 backdrop-blur border-4 border-yellow-500 rounded-2xl px-6 py-4 shadow-xl text-center transform transition-transform duration-200">
+                <p class="text-gray-500 text-xs mb-1 font-bold">請接住缺少的字！</p>
+                <h1 id="idiomDisplay" class="text-4xl md:text-6xl font-black text-gray-800 tracking-widest">
+                    一石二＿
+                </h1>
+            </div>
         </div>
+        
+        <!-- Pause Button -->
+        <button id="pauseBtn" class="absolute top-4 left-1/2 -translate-x-1/2 bg-white/50 p-2 rounded-full hover:bg-white interactive-ui">
+            <i class="fas fa-pause text-gray-700"></i>
+        </button>
     </div>
 
-    <!-- Lobby Screen -->
-    <div id="lobbyScreen" class="absolute inset-0 bg-gradient-to-br from-yellow-300 to-purple-400 flex flex-col items-center justify-center z-50 p-4">
-        <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center border-8 border-white/50">
-            <h1 class="text-4xl font-black text-blue-600 mb-2 tracking-tight">⚡ 成語大亂鬥 ⚡</h1>
-            <p class="text-gray-500 mb-6 font-bold">雙人推擠對戰版</p>
+    <!-- Start Screen -->
+    <div id="startScreen" class="absolute inset-0 bg-gradient-to-b from-blue-400 to-green-400 flex flex-col items-center justify-center interactive-ui z-50 overflow-hidden">
+        <!-- Decoration Circles -->
+        <div class="absolute top-10 left-10 w-20 h-20 bg-white/20 rounded-full blur-xl"></div>
+        <div class="absolute bottom-10 right-10 w-40 h-40 bg-yellow-300/30 rounded-full blur-2xl"></div>
 
-            <div id="authSection" class="mb-4">
-                 <p class="text-gray-400 text-sm loading-dots">正在連線伺服器</p>
+        <div class="bg-white/95 backdrop-blur-sm p-6 md:p-8 rounded-3xl border-8 border-yellow-400 max-w-md w-[90%] text-center shadow-2xl relative">
+            <div class="mb-4 relative inline-block">
+                 <img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/dream-world/25.svg" alt="Pikachu" class="w-24 h-24 mx-auto animate-bounce drop-shadow-lg">
             </div>
-
-            <div id="menuSection" class="hidden space-y-4">
-                <button id="createBtn" class="w-full bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-bold py-4 rounded-xl shadow-lg border-b-4 border-yellow-600 active:border-b-0 active:translate-y-1 transition text-lg">
-                    <i class="fas fa-plus-circle"></i> 建立房間
-                </button>
-                
-                <div class="relative">
-                    <div class="absolute inset-0 flex items-center">
-                        <div class="w-full border-t border-gray-300"></div>
-                    </div>
-                    <div class="relative flex justify-center text-sm">
-                        <span class="px-2 bg-white text-gray-500">或是</span>
-                    </div>
-                </div>
-
-                <div class="flex gap-2">
-                    <input type="text" id="roomInput" placeholder="輸入房號 (4碼)" maxlength="4" class="flex-1 bg-gray-100 border-2 border-gray-300 rounded-xl px-4 py-2 text-center font-bold text-xl uppercase focus:outline-none focus:border-blue-500">
-                    <button id="joinBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold px-6 py-2 rounded-xl shadow-lg border-b-4 border-blue-700 active:border-b-0 active:translate-y-1 transition">
-                        加入
+            
+            <h1 class="text-3xl md:text-4xl font-black text-blue-600 mb-1 tracking-tight">⚡ 比卡超 ⚡</h1>
+            <h2 class="text-xl md:text-2xl font-bold text-gray-700 mb-6">成語大冒險</h2>
+            
+            <div class="space-y-3">
+                <p class="text-gray-500 text-sm font-bold mb-2">選擇難度</p>
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <button onclick="startGame('easy')" class="bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-xl shadow-lg border-b-4 border-green-700 active:border-b-0 active:translate-y-1 transition">
+                        🌱 初級
+                    </button>
+                    <button onclick="startGame('hard')" class="bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl shadow-lg border-b-4 border-red-700 active:border-b-0 active:translate-y-1 transition">
+                        🔥 高級
                     </button>
                 </div>
+                
+                <button id="collectionBtn" class="w-full bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-bold py-3 rounded-xl shadow-lg border-b-4 border-yellow-600 active:border-b-0 active:translate-y-1 transition flex items-center justify-center gap-2">
+                    <i class="fas fa-book-open"></i> 精靈收集冊
+                </button>
             </div>
+            
+            <p class="mt-4 text-xs text-gray-400">電腦: 方向鍵 | 手機: 按住滑動</p>
+        </div>
+    </div>
 
-            <div id="waitingSection" class="hidden text-center py-4">
-                <div class="animate-spin text-4xl text-blue-500 mb-4"><i class="fas fa-spinner"></i></div>
-                <h3 class="text-xl font-bold text-gray-800 mb-2">等待對手加入...</h3>
-                <p class="text-3xl font-mono font-black bg-gray-100 py-2 rounded-lg mb-4 select-all" id="generatedRoomCode">----</p>
-                <p class="text-sm text-gray-500">請將此號碼告訴你的朋友</p>
+    <!-- Collection Modal -->
+    <div id="collectionModal" class="hidden absolute inset-0 bg-black/90 flex flex-col items-center justify-center interactive-ui z-50 p-4">
+        <div class="bg-white rounded-3xl w-full max-w-2xl h-[80vh] flex flex-col overflow-hidden shadow-2xl">
+            <div class="bg-yellow-400 p-4 flex justify-between items-center border-b-4 border-yellow-500">
+                <h2 class="text-xl font-bold text-yellow-900"><i class="fas fa-shapes"></i> 我的精靈夥伴</h2>
+                <button id="closeCollectionBtn" class="text-yellow-900 hover:bg-yellow-500 p-2 rounded-lg transition">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="p-6 overflow-y-auto bg-gray-50 flex-1">
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="collectionGrid">
+                    <!-- Cards injected by JS -->
+                </div>
+            </div>
+            
+            <div class="bg-gray-100 p-3 text-center text-xs text-gray-500 border-t">
+                累積更高分數來解鎖更多精靈！
             </div>
         </div>
     </div>
-    
+
+    <!-- Unlock Notification -->
+    <div id="unlockNotif" class="hidden absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-yellow-100 border-4 border-yellow-500 p-6 rounded-2xl shadow-2xl z-[60] text-center transform scale-0 transition-transform duration-500">
+        <div class="text-4xl mb-2">✨ 新夥伴解鎖！ ✨</div>
+        <img id="unlockImg" src="" class="w-32 h-32 mx-auto my-2 drop-shadow-md">
+        <h3 id="unlockName" class="text-2xl font-bold text-gray-800"></h3>
+        <button onclick="closeUnlock()" class="mt-4 bg-blue-500 text-white px-6 py-2 rounded-full font-bold shadow hover:bg-blue-600">太棒了！</button>
+    </div>
+
     <!-- Game Over Screen -->
-    <div id="gameOverScreen" class="hidden absolute inset-0 bg-black/85 flex flex-col items-center justify-center z-50 pointer-events-auto">
-        <div class="bg-white p-8 rounded-3xl border-8 border-gray-300 max-w-md w-[90%] text-center shadow-2xl animate-bounce">
-            <h2 class="text-4xl font-black text-gray-800 mb-2" id="winnerText">XXX 獲勝！</h2>
-            <div class="flex justify-center gap-8 my-6">
-                <div class="text-center">
-                    <p class="text-xs font-bold text-gray-500">P1</p>
-                    <p class="text-2xl font-bold text-yellow-600" id="endScoreP1">0</p>
-                </div>
-                <div class="text-center">
-                    <p class="text-xs font-bold text-gray-500">P2</p>
-                    <p class="text-2xl font-bold text-purple-600" id="endScoreP2">0</p>
-                </div>
+    <div id="gameOverScreen" class="hidden absolute inset-0 bg-black/85 flex flex-col items-center justify-center interactive-ui z-50">
+        <div class="bg-white p-8 rounded-3xl border-8 border-gray-300 max-w-md w-[90%] text-center shadow-2xl animate-fade-in">
+            <h2 class="text-3xl font-bold text-gray-800 mb-2">冒險結束</h2>
+            
+            <div class="bg-blue-50 rounded-xl p-4 mb-6 border-2 border-blue-100">
+                <p class="text-sm text-gray-500 uppercase tracking-wide">本局得分</p>
+                <p id="finalScore" class="text-6xl font-black text-blue-600 my-2">0</p>
+                <p id="highScoreLabel" class="text-xs text-yellow-600 font-bold bg-yellow-100 inline-block px-2 py-1 rounded-full hidden">🏆 新高分！</p>
             </div>
-            <button onclick="location.reload()" class="bg-blue-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg hover:bg-blue-600 transition">
-                回到大廳
-            </button>
+
+            <div class="flex gap-3">
+                <button onclick="showStartScreen()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 rounded-xl shadow border-b-4 border-gray-700">
+                    主選單
+                </button>
+                <button id="restartBtn" class="flex-1 bg-yellow-400 hover:bg-yellow-300 text-yellow-900 font-bold py-3 rounded-xl shadow border-b-4 border-yellow-600 animate-pulse">
+                    再來一次
+                </button>
+            </div>
         </div>
     </div>
 
-    <!-- Firebase SDKs -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc, increment, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    <script>
+        // --- 遊戲資料 ---
+        const idioms = [
+            { text: "一石二＿", answer: "鳥", decoys: ["魚", "馬", "蟲", "貓"] },
+            { text: "守株待＿", answer: "兔", decoys: ["虎", "龍", "豬", "狗"] },
+            { text: "畫蛇添＿", answer: "足", decoys: ["手", "頭", "尾", "翼"] },
+            { text: "對牛彈＿", answer: "琴", decoys: ["吉", "鼓", "笛", "歌"] },
+            { text: "馬馬虎＿", answer: "虎", decoys: ["馬", "獅", "豹", "象"] },
+            { text: "五花八＿", answer: "門", decoys: ["窗", "路", "刀", "劍"] },
+            { text: "車水馬＿", answer: "龍", decoys: ["虎", "蛇", "象", "獅"] },
+            { text: "亡羊補＿", answer: "牢", decoys: ["衣", "網", "屋", "牆"] },
+            { text: "井底之＿", answer: "蛙", decoys: ["魚", "蛇", "鳥", "蟲"] },
+            { text: "狐假虎＿", answer: "威", decoys: ["尾", "爪", "牙", "毛"] },
+            { text: "三心兩＿", answer: "意", decoys: ["手", "腳", "頭", "眼"] },
+            { text: "七上八＿", answer: "下", decoys: ["中", "左", "右", "前"] },
+            { text: "虎頭蛇＿", answer: "尾", decoys: ["頭", "腳", "身", "皮"] },
+            { text: "鳥語花＿", answer: "香", decoys: ["臭", "美", "紅", "綠"] },
+            { text: "雪中送＿", answer: "炭", decoys: ["水", "冰", "花", "禮"] }
+        ];
 
-        // --- Configuration & Global Variables ---
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'pikachu-battle';
-        
-        let currentUser = null;
-        let roomId = null;
-        let isHost = false;
-        let unsubscribeRoom = null;
-        
-        // Game State
+        // 收集品資料 (使用 PokeAPI Dream World 圖片)
+        // 圖片來源: https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/dream-world/{id}.svg
+        const collectibles = [
+            { id: 25, name: "比卡超", reqScore: 0, desc: "你的冒險夥伴！" },
+            { id: 172, name: "皮丘", reqScore: 50, desc: "比卡超的進化前型態，小小隻很可愛。" },
+            { id: 133, name: "伊布", reqScore: 100, desc: "擁有多種進化可能性的精靈。" },
+            { id: 4, name: "小火龍", reqScore: 200, desc: "尾巴上的火焰代表生命力。" },
+            { id: 7, name: "車厘龜", reqScore: 300, desc: "遇到危險時會縮進殼裡。" },
+            { id: 1, name: "奇異種子", reqScore: 400, desc: "背上的種子會隨著成長變大。" },
+            { id: 26, name: "雷丘", reqScore: 600, desc: "比卡超的進化型，電力更強！" },
+            { id: 143, name: "卡比獸", reqScore: 800, desc: "吃飽了就睡，睡飽了就吃。" },
+            { id: 150, name: "超夢", reqScore: 1000, desc: "傳說中最強的人造精靈！" }
+        ];
+
+        // --- 變數 ---
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         
-        // 成語資料庫
-        const idioms = [
-            { text: "一石二＿", answer: "鳥", decoys: ["魚", "馬", "蟲"] },
-            { text: "守株待＿", answer: "兔", decoys: ["虎", "龍", "豬"] },
-            { text: "畫蛇添＿", answer: "足", decoys: ["手", "頭", "尾"] },
-            { text: "對牛彈＿", answer: "琴", decoys: ["吉", "鼓", "笛"] },
-            { text: "虎頭蛇＿", answer: "尾", decoys: ["頭", "腳", "身"] },
-            { text: "亡羊補＿", answer: "牢", decoys: ["衣", "網", "屋"] },
-            { text: "井底之＿", answer: "蛙", decoys: ["魚", "蛇", "鳥"] },
-            { text: "三心兩＿", answer: "意", decoys: ["手", "腳", "頭"] },
-            { text: "雪中送＿", answer: "炭", decoys: ["水", "冰", "花"] },
-            { text: "一鳴驚＿", answer: "人", decoys: ["天", "地", "鬼"] },
-            { text: "車水馬＿", answer: "龍", decoys: ["虎", "獅", "豹"] },
-            { text: "五花八＿", answer: "門", decoys: ["路", "街", "道"] },
-            { text: "狐假虎＿", answer: "威", decoys: ["背", "爪", "牙"] },
-            { text: "畫龍點＿", answer: "睛", decoys: ["頭", "尾", "鱗"] },
-            { text: "盲人摸＿", answer: "象", decoys: ["虎", "馬", "牛"] },
-            { text: "入木三＿", answer: "分", decoys: ["寸", "尺", "丈"] },
-            { text: "雞飛狗＿", answer: "跳", decoys: ["叫", "跑", "走"] },
-            { text: "打草驚＿", answer: "蛇", decoys: ["鳥", "兔", "虎"] },
-            { text: "順手牽＿", answer: "羊", decoys: ["牛", "馬", "狗"] },
-            { text: "膽小如＿", answer: "鼠", decoys: ["兔", "雞", "貓"] }
-        ];
-
         let gameState = {
-            status: 'menu', // menu, waiting, playing, gameover
-            items: [], // local items
-            p1: { x: 100, score: 0, connected: false },
-            p2: { x: 300, score: 0, connected: false },
-            currentIdiom: idioms[0],
-            winner: null
+            score: 0,
+            lives: 3,
+            isPlaying: false,
+            difficulty: 'easy', // 'easy' or 'hard'
+            gameSpeed: 3,
+            spawnInterval: 1500,
+            highScore: localStorage.getItem('pikachu_highscore') || 0
         };
 
-        // Local Player Settings
-        let localPlayer = {
-            role: null, // 'p1' or 'p2'
-            x: 0,
-            y: 0, // set in resize
-            vx: 0,
-            width: 80,
-            height: 80,
-            maxSpeed: 10,
-            friction: 0.9,
-            targetX: null,
-            lastSync: 0
+        let lastTime = 0;
+        let spawnTimer = 0;
+        let currentIdiomIndex = 0;
+        
+        // 實體
+        let player;
+        let items = [];
+        let particles = [];
+
+        // DOM 元素
+        const uiElements = {
+            score: document.getElementById('scoreDisplay'),
+            lives: document.getElementById('livesDisplay'),
+            idiom: document.getElementById('idiomDisplay'),
+            questionBox: document.getElementById('questionBox'),
+            startScreen: document.getElementById('startScreen'),
+            gameOverScreen: document.getElementById('gameOverScreen'),
+            uiLayer: document.getElementById('uiLayer'),
+            finalScore: document.getElementById('finalScore'),
+            highScoreLabel: document.getElementById('highScoreLabel'),
+            collectionModal: document.getElementById('collectionModal'),
+            collectionGrid: document.getElementById('collectionGrid'),
+            unlockNotif: document.getElementById('unlockNotif'),
+            unlockImg: document.getElementById('unlockImg'),
+            unlockName: document.getElementById('unlockName'),
+            difficultyBadge: document.getElementById('difficultyBadge')
         };
 
-        // Assets
-        const imgP1 = new Image();
-        imgP1.src = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/dream-world/25.svg'; // Pikachu
-        
-        const imgP2 = new Image();
-        imgP2.src = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/dream-world/778.svg'; // Mimikyu (Rival)
+        // --- 類別 ---
 
-        // --- Authentication ---
-        async function initAuth() {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
+        class Player {
+            constructor() {
+                this.width = 90;
+                this.height = 90;
+                this.x = canvas.width / 2 - this.width / 2;
+                this.y = canvas.height - this.height - 30; 
+                this.vx = 0;
+                this.maxSpeed = gameState.difficulty === 'hard' ? 12 : 9; // 困難模式移動更快
+                this.friction = 0.9;
+                this.targetX = null;
+                
+                this.image = new Image();
+                // 使用更鮮豔的 Dream World 風格
+                this.image.src = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/dream-world/25.svg';
+                this.isLoaded = false;
+                this.image.onload = () => this.isLoaded = true;
+                
+                // 跑動動畫效果變數
+                this.bounceY = 0;
+                this.bounceAngle = 0;
+            }
+
+            update() {
+                // 移動邏輯
+                if (this.targetX !== null) {
+                    const dx = this.targetX - (this.x + this.width/2);
+                    this.x += dx * 0.15;
                 } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (e) {
-                console.error("Auth failed", e);
-            }
-        }
-        
-        initAuth();
-
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                currentUser = user;
-                document.getElementById('authSection').classList.add('hidden');
-                document.getElementById('menuSection').classList.remove('hidden');
-                console.log("Logged in:", user.uid);
-            }
-        });
-
-        // --- Room Logic ---
-
-        // Generate a random 4 digit code
-        function generateRoomCode() {
-            return Math.floor(1000 + Math.random() * 9000).toString();
-        }
-
-        async function createRoom() {
-            if (!currentUser) return;
-            
-            const code = generateRoomCode();
-            roomId = code;
-            isHost = true;
-            localPlayer.role = 'p1';
-            localPlayer.x = canvas.width * 0.25;
-
-            // Initial State in Firestore
-            try {
-                // FIX: Added 'rooms' collection segment to ensure even number of path segments
-                // Path: artifacts/{appId}/public/data/rooms/{roomId}
-                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', room_${roomId}), {
-                    hostId: currentUser.uid,
-                    status: 'waiting',
-                    createdAt: Date.now(),
-                    currentIdiomIndex: 0,
-                    spawnEvent: null, // Host writes { id, type, text, x, vy, isCorrect } here
-                    p1: { x: localPlayer.x, score: 0, connected: true },
-                    p2: { x: 0, score: 0, connected: false }
-                });
-
-                document.getElementById('menuSection').classList.add('hidden');
-                document.getElementById('waitingSection').classList.remove('hidden');
-                document.getElementById('generatedRoomCode').innerText = roomId;
-                
-                subscribeToRoom();
-
-            } catch (e) {
-                console.error("Error creating room:", e);
-                alert("建立房間失敗，請重試");
-            }
-        }
-
-        async function joinRoom() {
-            if (!currentUser) return;
-            const input = document.getElementById('roomInput');
-            const code = input.value.trim();
-            
-            if (code.length !== 4) {
-                alert("請輸入4位數房號");
-                return;
-            }
-
-            roomId = code;
-            isHost = false;
-            localPlayer.role = 'p2';
-            localPlayer.x = canvas.width * 0.75;
-
-            try {
-                // FIX: Added 'rooms' collection segment
-                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', room_${roomId});
-                const roomSnap = await getDoc(roomRef);
-
-                if (!roomSnap.exists()) {
-                    alert("房間不存在");
-                    return;
+                    this.x += this.vx;
+                    this.vx *= this.friction;
                 }
 
-                if (roomSnap.data().status !== 'waiting') {
-                    alert("遊戲已經開始或結束");
-                    return;
-                }
+                // 邊界
+                if (this.x < 0) this.x = 0;
+                if (this.x + this.width > canvas.width) this.x = canvas.width - this.width;
 
-                // Update P2 status
-                await updateDoc(roomRef, {
-                    'p2.connected': true,
-                    'p2.x': localPlayer.x,
-                    status: 'playing' // Start game immediately upon join
-                });
-
-                document.getElementById('lobbyScreen').classList.add('hidden');
-                document.getElementById('gameUI').classList.remove('hidden');
-                document.getElementById('roomCodeDisplay').innerText = ROOM: ${roomId};
-                
-                subscribeToRoom();
-                startGameLoop();
-
-            } catch (e) {
-                console.error("Error joining:", e);
-                alert("加入失敗");
-            }
-        }
-
-        function subscribeToRoom() {
-            if (unsubscribeRoom) unsubscribeRoom();
-
-            // FIX: Added 'rooms' collection segment
-            unsubscribeRoom = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', room_${roomId}), (doc) => {
-                if (!doc.exists()) return;
-                const data = doc.data();
-
-                // Sync Remote Player Position & Score
-                if (localPlayer.role === 'p1') {
-                    if (data.p2) {
-                        gameState.p2.x = data.p2.x; // P2 is remote
-                        gameState.p2.score = data.p2.score;
-                        gameState.p2.connected = data.p2.connected;
-                        // Start game if waiting and P2 joins
-                        if (gameState.status === 'menu' && data.status === 'playing') {
-                            startGame();
-                        }
-                    }
+                // 簡單的彈跳動畫，只有在移動時明顯
+                if (Math.abs(this.vx) > 0.5 || (this.targetX && Math.abs(this.targetX - (this.x+this.width/2)) > 5)) {
+                    this.bounceAngle += 0.3;
+                    this.bounceY = Math.sin(this.bounceAngle) * 5;
                 } else {
-                    if (data.p1) {
-                        gameState.p1.x = data.p1.x; // P1 is remote
-                        gameState.p1.score = data.p1.score;
-                        gameState.p1.connected = data.p1.connected;
-                    }
-                }
-
-                // Sync Game State
-                if (data.status === 'playing' && gameState.status !== 'playing') {
-                    startGame();
-                }
-
-                // Handle Question Change
-                if (data.currentIdiomIndex !== undefined) {
-                    gameState.currentIdiom = idioms[data.currentIdiomIndex % idioms.length];
-                    document.getElementById('idiomDisplay').innerText = gameState.currentIdiom.text;
-                }
-
-                // Handle Spawn Events (Host spawns, Guest receives)
-                if (!isHost && data.spawnEvent && data.spawnEvent.id !== lastSpawnId) {
-                    spawnItemFromEvent(data.spawnEvent);
-                    lastSpawnId = data.spawnEvent.id;
-                }
-
-                // Update UI Scores
-                document.getElementById('p1Score').innerText = data.p1?.score || 0;
-                document.getElementById('p2Score').innerText = data.p2?.score || 0;
-                
-                // Win Condition
-                if (data.status === 'gameover') {
-                    endGame(data.winner);
-                }
-
-            }, (error) => {
-                console.error("Firestore sync error:", error);
-            });
-        }
-
-        // --- Game Logic ---
-
-        let lastSpawnId = null;
-        let lastSyncTime = 0;
-        let animationFrameId;
-
-        function startGame() {
-            document.getElementById('lobbyScreen').classList.add('hidden');
-            document.getElementById('gameUI').classList.remove('hidden');
-            gameState.status = 'playing';
-            resizeCanvas();
-            
-            if (isHost) {
-                // Host starts the spawning loop
-                hostLoop();
-            }
-            
-            startGameLoop();
-        }
-
-        // Only Host runs this to generate items
-        function hostLoop() {
-            if (gameState.status !== 'playing') return;
-            
-            // Randomly spawn item every 1-2 seconds
-            setTimeout(() => {
-                if (gameState.status !== 'playing') return;
-                
-                const idiom = gameState.currentIdiom;
-                const isCorrect = Math.random() < 0.4; // 40% chance correct answer
-                const text = isCorrect ? idiom.answer : idiom.decoys[Math.floor(Math.random() * idiom.decoys.length)];
-                
-                const event = {
-                    id: Date.now() + Math.random(),
-                    text: text,
-                    isCorrect: isCorrect,
-                    x: Math.random() * (canvas.width - 60) + 30,
-                    vy: 3 + Math.random() * 2 // Speed
-                };
-
-                // Write to DB
-                // FIX: Added 'rooms' collection segment
-                updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', room_${roomId}), {
-                    spawnEvent: event
-                }).catch(console.error);
-                
-                // Spawn locally for Host too
-                spawnItemFromEvent(event);
-
-                hostLoop();
-            }, 1000 + Math.random() * 1000);
-        }
-
-        function spawnItemFromEvent(event) {
-            gameState.items.push({
-                ...event,
-                y: -50,
-                radius: 35,
-                active: true
-            });
-        }
-
-        function syncPosition() {
-            const now = Date.now();
-            // Rate limit updates to 100ms
-            if (now - lastSyncTime > 100) {
-                const field = localPlayer.role === 'p1' ? 'p1.x' : 'p2.x';
-                // FIX: Added 'rooms' collection segment
-                updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', room_${roomId}), {
-                    [field]: localPlayer.x
-                }).catch(e => {}); // Ignore minor errors
-                lastSyncTime = now;
-            }
-        }
-
-        async function handleScore(isCorrect) {
-            // Optimistic UI update handled by listener
-            const field = localPlayer.role === 'p1' ? 'p1.score' : 'p2.score';
-            const change = isCorrect ? 10 : -5;
-            
-            try {
-                // FIX: Added 'rooms' collection segment
-                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', room_${roomId}), {
-                    [field]: increment(change)
-                });
-                
-                if (isCorrect && isHost) {
-                    // Host changes question if correct answer caught
-                    const nextIndex = Math.floor(Math.random() * idioms.length);
-                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', room_${roomId}), {
-                        currentIdiomIndex: nextIndex
-                    });
-                }
-            } catch (e) {
-                console.error("Score update failed", e);
-            }
-        }
-
-        function endGame(winner) {
-            gameState.status = 'gameover';
-            cancelAnimationFrame(animationFrameId);
-            document.getElementById('gameOverScreen').classList.remove('hidden');
-            document.getElementById('winnerText').innerText = winner === 'p1' ? '比卡超 獲勝！' : '謎擬Q 獲勝！';
-            document.getElementById('winnerText').className = winner === 'p1' ? 'text-4xl font-black text-yellow-600 mb-2' : 'text-4xl font-black text-purple-600 mb-2';
-            
-            // Final sync scores
-            document.getElementById('endScoreP1').innerText = document.getElementById('p1Score').innerText;
-            document.getElementById('endScoreP2').innerText = document.getElementById('p2Score').innerText;
-        }
-
-        // --- Physics & Drawing ---
-
-        function startGameLoop() {
-            function loop() {
-                if (gameState.status !== 'playing') return;
-                
-                update();
-                draw();
-                animationFrameId = requestAnimationFrame(loop);
-            }
-            loop();
-        }
-
-        function update() {
-            // 1. Move Local Player
-            if (localPlayer.targetX !== null) {
-                const dx = localPlayer.targetX - (localPlayer.x + localPlayer.width/2);
-                localPlayer.x += dx * 0.15;
-                if(Math.abs(dx) < 1) localPlayer.targetX = null;
-            } else {
-                localPlayer.x += localPlayer.vx;
-                localPlayer.vx *= localPlayer.friction;
-            }
-
-            // Boundaries
-            if (localPlayer.x < 0) { localPlayer.x = 0; localPlayer.vx = 0; }
-            if (localPlayer.x + localPlayer.width > canvas.width) { localPlayer.x = canvas.width - localPlayer.width; localPlayer.vx = 0; }
-
-            // 2. Collision with Other Player (Pushing!)
-            // We only effect OURSELVES. If we hit the ghost of the other player, we bounce back.
-            const otherX = localPlayer.role === 'p1' ? gameState.p2.x : gameState.p1.x;
-            const myCenter = localPlayer.x + localPlayer.width/2;
-            const otherCenter = otherX + localPlayer.width/2; // Assume same width
-            const dist = Math.abs(myCenter - otherCenter);
-            
-            // Collision threshold
-            if (dist < localPlayer.width * 0.😎 {
-                // Determine direction
-                if (myCenter < otherCenter) {
-                    // I am to the left, push me left
-                    localPlayer.vx = -15; // Strong push
-                    localPlayer.x -= 5;
-                } else {
-                    // I am to the right, push me right
-                    localPlayer.vx = 15;
-                    localPlayer.x += 5;
+                    this.bounceY = 0;
                 }
             }
 
-            // Sync if moved
-            if (Math.abs(localPlayer.vx) > 0.1 || localPlayer.targetX !== null) {
-                syncPosition();
-            }
-
-            // 3. Update Items
-            gameState.items.forEach(item => {
-                if (!item.active) return;
-                item.y += item.vy;
-
-                // Collision with Local Player
-                const dx = item.x - (localPlayer.x + localPlayer.width/2);
-                const dy = item.y - (localPlayer.y + localPlayer.height/2);
-                const distance = Math.hypot(dx, dy);
-
-                if (distance < item.radius + 40) {
-                    // Caught!
-                    item.active = false;
-                    handleScore(item.isCorrect);
-                    
-                    // Visual feedback
-                    createParticles(item.x, item.y, item.isCorrect ? '#FFD700' : '#888');
-                }
-
-                // Remove if off screen
-                if (item.y > canvas.height + 50) item.active = false;
-            });
-            
-            // Cleanup inactive items
-            gameState.items = gameState.items.filter(i => i.active);
-
-            // Check Win Condition (First to 200 or something? Let's just play endless for now or until host ends)
-        }
-
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // Ground
-            ctx.fillStyle = '#bbf7d0';
-            ctx.fillRect(0, canvas.height - 30, canvas.width, 30);
-
-            // Draw Items
-            gameState.items.forEach(item => {
+            draw() {
                 ctx.save();
-                ctx.translate(item.x, item.y);
+                const centerX = this.x + this.width/2;
+                const centerY = this.y + this.height/2 + this.bounceY;
                 
-                // Pokeball Style
+                // 傾斜效果
+                const tilt = (this.vx * 0.05); 
+                
+                ctx.translate(centerX, centerY);
+                ctx.rotate(tilt);
+
+                if (this.isLoaded) {
+                    // 繪製陰影
+                    ctx.save();
+                    ctx.scale(1, 0.3);
+                    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                    ctx.beginPath();
+                    ctx.arc(0, this.height/2 / 0.3 + 10, 30, 0, Math.PI*2);
+                    ctx.fill();
+                    ctx.restore();
+
+                    ctx.drawImage(this.image, -this.width/2, -this.height/2, this.width, this.height);
+                } else {
+                    ctx.fillStyle = '#FFD700';
+                    ctx.fillRect(-30, -30, 60, 60);
+                }
+                ctx.restore();
+            }
+        }
+
+        class Item {
+            constructor(text, isCorrect) {
+                this.radius = 35;
+                this.x = Math.random() * (canvas.width - this.radius * 2) + this.radius;
+                this.y = -60;
+                this.text = text;
+                this.isCorrect = isCorrect;
+                // 速度根據難度變化
+                const baseSpeed = gameState.gameSpeed;
+                this.vy = baseSpeed + Math.random() * 2; 
+                this.rotation = (Math.random() - 0.5) * 0.5;
+            }
+
+            update() {
+                this.y += this.vy;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation * (this.y * 0.01)); // 隨著掉落旋轉
+
+                // 繪製精靈球
+                // 外圈
                 ctx.beginPath();
-                ctx.arc(0, 0, item.radius, 0, Math.PI * 2);
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
                 ctx.fillStyle = '#FFF';
                 ctx.fill();
                 ctx.strokeStyle = '#333';
                 ctx.lineWidth = 3;
                 ctx.stroke();
 
+                // 上半部顏色
                 ctx.beginPath();
-                ctx.arc(0, 0, item.radius, Math.PI, 0);
-                ctx.fillStyle = item.isCorrect ? '#ef4444' : '#3b82f6';
+                ctx.arc(0, 0, this.radius, Math.PI, 0);
+                // 正確答案用鮮艷紅色(精靈球)，錯誤用藍色(超級球)
+                ctx.fillStyle = this.isCorrect ? '#ef4444' : '#3b82f6';
                 ctx.fill();
                 ctx.stroke();
 
-                // Text
-                ctx.fillStyle = 'white';
-                ctx.font = 'bold 24px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText(item.text, 0, -40);
+                // 中間按鈕
+                ctx.beginPath();
+                ctx.rect(-this.radius, -2, this.radius*2, 4);
+                ctx.fillStyle = '#333';
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.arc(0, 0, 10, 0, Math.PI * 2);
+                ctx.fillStyle = '#FFF';
+                ctx.fill();
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.arc(0, 0, 5, 0, Math.PI * 2);
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // 文字背景
+                ctx.translate(0, -this.radius - 10);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.beginPath();
+                ctx.roundRect(-25, -25, 50, 40, 5);
+                ctx.fill();
+                
+                // 文字
+                ctx.font = "900 32px 'Noto Sans TC'";
+                ctx.fillStyle = this.isCorrect ? "#cc0000" : "#0033cc";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(this.text, 0, -5);
 
                 ctx.restore();
-            });
-
-            // Draw Players
-            drawPlayer(localPlayer.x, localPlayer.y, localPlayer.role === 'p1' ? imgP1 : imgP2, true);
-            
-            // Draw Remote Player
-            const remoteX = localPlayer.role === 'p1' ? gameState.p2.x : gameState.p1.x;
-            const remoteImg = localPlayer.role === 'p1' ? imgP2 : imgP1;
-            // Simple interpolation for smooth visual of remote player
-            // But for simplicity in this file, we just draw raw X. 
-            // Better: remoteVisualX = lerp(remoteVisualX, remoteX, 0.1)
-            drawPlayer(remoteX, localPlayer.y, remoteImg, false);
-
-            // Draw Particles
-            updateAndDrawParticles();
+            }
         }
 
-        function drawPlayer(x, y, img, isLocal) {
-            ctx.save();
-            ctx.translate(x + 40, y + 40);
-            
-            // Shadow
-            ctx.beginPath();
-            ctx.ellipse(0, 45, 30, 10, 0, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(0,0,0,0.2)';
-            ctx.fill();
+        class Particle {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.life = 1;
+                this.type = type; // 'star', 'circle'
+                this.vx = (Math.random() - 0.5) * 10;
+                this.vy = (Math.random() - 0.5) * 10;
+                this.color = `hsl(${Math.random()*60 + 40}, 100%, 50%)`; // 金黃色系
+                this.size = Math.random() * 8 + 4;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += 0.5; // 重力
+                this.life -= 0.03;
+                this.size *= 0.95;
+            }
+            draw() {
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                if(this.type === 'star') {
+                    // 簡單方形模擬星星
+                    ctx.translate(this.x, this.y);
+                    ctx.rotate(this.life * 5);
+                    ctx.fillRect(-this.size/2, -this.size/2, this.size, this.size);
+                    ctx.setTransform(1,0,0,1,0,0); // 重置
+                } else {
+                    ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+                    ctx.fill();
+                }
+                ctx.globalAlpha = 1;
+            }
+        }
 
-            // Image
-            if (img.complete) {
-                ctx.drawImage(img, -40, -40, 80, 80);
+        // --- 核心邏輯 ---
+
+        function startGame(difficulty) {
+            gameState.difficulty = difficulty;
+            
+            // 設定難度參數
+            if (difficulty === 'easy') {
+                gameState.gameSpeed = 3;
+                gameState.spawnInterval = 1800;
+                uiElements.difficultyBadge.innerText = "難度: 初級";
+                uiElements.difficultyBadge.className = "bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-bold";
             } else {
-                ctx.fillStyle = 'yellow';
-                ctx.fillRect(-40, -40, 80, 80);
+                gameState.gameSpeed = 6; // 掉落更快
+                gameState.spawnInterval = 1000; // 生成更頻繁
+                uiElements.difficultyBadge.innerText = "難度: 高級";
+                uiElements.difficultyBadge.className = "bg-red-100 text-red-800 px-2 py-1 rounded text-xs font-bold";
             }
 
-            // Indicator
-            if (isLocal) {
-                ctx.beginPath();
-                ctx.moveTo(0, -50);
-                ctx.lineTo(-10, -60);
-                ctx.lineTo(10, -60);
-                ctx.fillStyle = localPlayer.role === 'p1' ? '#EAB308' : '#A855F7';
-                ctx.fill();
-            }
-
-            ctx.restore();
+            uiElements.startScreen.classList.add('hidden');
+            uiElements.gameOverScreen.classList.add('hidden');
+            uiElements.uiLayer.classList.remove('hidden');
+            
+            gameState.score = 0;
+            gameState.lives = 3;
+            gameState.isPlaying = true;
+            
+            player = new Player();
+            items = [];
+            particles = [];
+            
+            resizeCanvas();
+            updateHUD();
+            pickIdiom();
+            
+            lastTime = performance.now();
+            requestAnimationFrame(gameLoop);
         }
 
-        // --- Particles ---
-        let particles = [];
-        function createParticles(x, y, color) {
-            for(let i=0; i<15; i++) {
-                particles.push({
-                    x, y,
-                    vx: (Math.random() - 0.5) * 10,
-                    vy: (Math.random() - 0.5) * 10,
-                    life: 1,
-                    color
-                });
-            }
+        function pickIdiom() {
+            currentIdiomIndex = Math.floor(Math.random() * idioms.length);
+            const idiom = idioms[currentIdiomIndex];
+            uiElements.idiom.innerText = idiom.text;
+            
+            // 動畫提示
+            uiElements.questionBox.classList.remove('scale-100');
+            uiElements.questionBox.classList.add('scale-110', 'bg-yellow-50');
+            setTimeout(() => {
+                uiElements.questionBox.classList.remove('scale-110', 'bg-yellow-50');
+                uiElements.questionBox.classList.add('scale-100');
+            }, 200);
         }
-        function updateAndDrawParticles() {
-            particles.forEach(p => {
-                p.x += p.vx;
-                p.y += p.vy;
-                p.life -= 0.05;
-                ctx.globalAlpha = p.life;
-                ctx.fillStyle = p.color;
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, 5, 0, Math.PI*2);
-                ctx.fill();
+
+        function spawnItem() {
+            if (!gameState.isPlaying) return;
+            const idiom = idioms[currentIdiomIndex];
+            const isCorrect = Math.random() < 0.45; // 45% 機率是正確答案
+            
+            let text = isCorrect ? idiom.answer : idiom.decoys[Math.floor(Math.random() * idiom.decoys.length)];
+            items.push(new Item(text, isCorrect));
+        }
+
+        function handleCollision(item) {
+            if (item.isCorrect) {
+                // 正確
+                gameState.score += 10;
+                createExplosion(item.x, item.y, 'star');
+                checkUnlocks(gameState.score); // 檢查是否有新收集品
+                pickIdiom(); // 換下一題
+                
+                // 隨著分數稍微增加難度
+                if (gameState.score % 50 === 0) {
+                    gameState.gameSpeed += 0.2;
+                    gameState.spawnInterval = Math.max(600, gameState.spawnInterval - 50);
+                }
+            } else {
+                // 錯誤
+                gameState.lives--;
+                createExplosion(item.x, item.y, 'circle');
+                document.body.classList.add('shake-screen');
+                setTimeout(() => document.body.classList.remove('shake-screen'), 500);
+                
+                if (gameState.lives <= 0) endGame();
+            }
+            updateHUD();
+        }
+
+        function createExplosion(x, y, type) {
+            for(let i=0; i<20; i++) particles.push(new Particle(x, y, type));
+        }
+
+        function updateHUD() {
+            uiElements.score.innerText = gameState.score;
+            
+            let heartsHtml = '';
+            for(let i=0; i<3; i++) {
+                heartsHtml += i < gameState.lives ? 
+                    '<span class="text-2xl md:text-3xl filter drop-shadow-md animate-pulse">❤️</span>' : 
+                    '<span class="text-2xl md:text-3xl opacity-30">🖤</span>';
+            }
+            uiElements.lives.innerHTML = heartsHtml;
+        }
+
+        function endGame() {
+            gameState.isPlaying = false;
+            uiElements.finalScore.innerText = gameState.score;
+            
+            // 處理最高分
+            const savedHigh = parseInt(localStorage.getItem('pikachu_highscore') || '0');
+            if (gameState.score > savedHigh) {
+                localStorage.setItem('pikachu_highscore', gameState.score);
+                uiElements.highScoreLabel.classList.remove('hidden');
+            } else {
+                uiElements.highScoreLabel.classList.add('hidden');
+            }
+
+            setTimeout(() => {
+                uiElements.uiLayer.classList.add('hidden');
+                uiElements.gameOverScreen.classList.remove('hidden');
+            }, 500);
+        }
+
+        function showStartScreen() {
+            uiElements.gameOverScreen.classList.add('hidden');
+            uiElements.startScreen.classList.remove('hidden');
+            uiElements.uiLayer.classList.add('hidden');
+        }
+
+        function gameLoop(time) {
+            if (!gameState.isPlaying) return;
+            
+            const dt = time - lastTime;
+            lastTime = time;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 繪製背景裝飾 (簡單的雲或草地)
+            ctx.fillStyle = '#dcfce7'; // 草地
+            ctx.fillRect(0, canvas.height - 30, canvas.width, 30);
+
+            // 生成物品
+            spawnTimer += dt;
+            if (spawnTimer > gameState.spawnInterval) {
+                spawnItem();
+                spawnTimer = 0;
+            }
+
+            // 更新與繪製玩家
+            if(player) {
+                player.update();
+                player.draw();
+            }
+
+            // 更新物品
+            items = items.filter(item => {
+                item.update();
+                item.draw();
+                
+                // 碰撞檢測
+                const dist = Math.hypot(item.x - (player.x + player.width/2), item.y - (player.y + player.height/2));
+                if (dist < item.radius + 40) {
+                    handleCollision(item);
+                    return false; // 移除
+                }
+                
+                return item.y < canvas.height + 50;
             });
-            ctx.globalAlpha = 1;
-            particles = particles.filter(p => p.life > 0);
+
+            // 更新粒子
+            particles = particles.filter(p => {
+                p.update();
+                p.draw();
+                return p.life > 0;
+            });
+
+            requestAnimationFrame(gameLoop);
         }
 
-        // --- Input & Resize ---
-        function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            localPlayer.y = canvas.height - 120;
-        }
-        window.addEventListener('resize', resizeCanvas);
+        // --- 收集系統 ---
 
-        // Input
-        function handleInput(clientX) {
-            if (gameState.status !== 'playing') return;
-            localPlayer.targetX = clientX;
+        function getUnlockedItems() {
+            const stored = localStorage.getItem('pikachu_collection');
+            return stored ? JSON.parse(stored) : [25]; // 預設解鎖 ID 25 (比卡超)
+        }
+
+        function checkUnlocks(score) {
+            // 這個函式會檢查目前的最高分(不只是當前局)是否符合解鎖條件
+            // 但為了簡單與即時反饋，我們檢查當前分數，並同時參考歷史最高分
+            const unlocked = getUnlockedItems();
+            let hasNewUnlock = false;
+            let newItem = null;
+
+            collectibles.forEach(item => {
+                // 如果尚未解鎖 且 分數達到要求
+                if (!unlocked.includes(item.id) && score >= item.reqScore) {
+                    unlocked.push(item.id);
+                    hasNewUnlock = true;
+                    newItem = item;
+                }
+            });
+
+            if (hasNewUnlock) {
+                localStorage.setItem('pikachu_collection', JSON.stringify(unlocked));
+                showUnlockNotif(newItem);
+            }
+        }
+
+        function showUnlockNotif(item) {
+            gameState.isPlaying = false; // 暫停遊戲以展示
+            uiElements.unlockName.innerText = item.name;
+            uiElements.unlockImg.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/dream-world/${item.id}.svg`;
+            
+            uiElements.unlockNotif.classList.remove('hidden');
+            // 動畫
+            setTimeout(() => {
+                uiElements.unlockNotif.classList.remove('scale-0');
+                uiElements.unlockNotif.classList.add('scale-100');
+            }, 50);
+        }
+
+        function closeUnlock() {
+            uiElements.unlockNotif.classList.add('scale-0');
+            setTimeout(() => {
+                uiElements.unlockNotif.classList.add('hidden');
+                gameState.isPlaying = true;
+                lastTime = performance.now();
+                requestAnimationFrame(gameLoop);
+            }, 300);
+        }
+
+        function renderCollection() {
+            const unlocked = getUnlockedItems();
+            const grid = uiElements.collectionGrid;
+            grid.innerHTML = '';
+
+            collectibles.forEach(item => {
+                const isUnlocked = unlocked.includes(item.id);
+                const card = document.createElement('div');
+                card.className = `bg-white p-3 rounded-xl border-2 ${isUnlocked ? 'border-yellow-400 unlocked' : 'border-gray-200 locked'} collection-card flex flex-col items-center text-center relative overflow-hidden`;
+                
+                const imgUrl = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/dream-world/${item.id}.svg`;
+                
+                card.innerHTML = `
+                    <div class="w-full aspect-square flex items-center justify-center mb-2 bg-gray-50 rounded-lg">
+                        <img src="${imgUrl}" class="w-20 h-20 object-contain">
+                    </div>
+                    <h3 class="font-bold ${isUnlocked ? 'text-gray-800' : 'text-gray-400'}">${isUnlocked ? item.name : '???'}</h3>
+                    ${!isUnlocked ? `<div class="absolute inset-0 bg-gray-200/50 flex items-center justify-center font-bold text-gray-500 text-sm">需 ${item.reqScore} 分</div>` : `<p class="text-xs text-gray-500 mt-1">${item.desc}</p>`}
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        // --- 輸入控制 ---
+
+        function handleInput(x) {
+            if(player) player.targetX = x;
         }
 
         canvas.addEventListener('mousemove', e => handleInput(e.clientX));
-        canvas.addEventListener('touchmove', e => { e.preventDefault(); handleInput(e.touches[0].clientX); }, { passive: false });
-        canvas.addEventListener('touchstart', e => { e.preventDefault(); handleInput(e.touches[0].clientX); }, { passive: false });
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            handleInput(e.touches[0].clientX);
+        }, { passive: false });
+        canvas.addEventListener('touchstart', e => {
+            e.preventDefault();
+            handleInput(e.touches[0].clientX);
+        }, { passive: false });
 
-        // Buttons
-        document.getElementById('createBtn').addEventListener('click', createRoom);
-        document.getElementById('joinBtn').addEventListener('click', joinRoom);
+        window.addEventListener('keydown', e => {
+            if (!player) return;
+            if (e.key === 'ArrowLeft') player.vx = -player.maxSpeed;
+            if (e.key === 'ArrowRight') player.vx = player.maxSpeed;
+            player.targetX = null;
+        });
+
+        window.addEventListener('keyup', e => {
+            if (!player) return;
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') player.vx = 0;
+        });
+
+        window.addEventListener('resize', resizeCanvas);
+        
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            if(player) {
+                player.y = canvas.height - player.height - 30;
+                if(player.x > canvas.width) player.x = canvas.width - player.width;
+            }
+        }
+
+        // 按鈕監聽
+        document.getElementById('restartBtn').addEventListener('click', () => {
+             startGame(gameState.difficulty); // 重開時保持同樣難度
+        });
+
+        document.getElementById('collectionBtn').addEventListener('click', () => {
+            renderCollection();
+            uiElements.collectionModal.classList.remove('hidden');
+        });
+
+        document.getElementById('closeCollectionBtn').addEventListener('click', () => {
+            uiElements.collectionModal.classList.add('hidden');
+        });
+
+        document.getElementById('pauseBtn').addEventListener('click', () => {
+            if(gameState.isPlaying) {
+                gameState.isPlaying = false;
+                document.getElementById('pauseBtn').innerHTML = '<i class="fas fa-play text-gray-700"></i>';
+            } else {
+                gameState.isPlaying = true;
+                lastTime = performance.now();
+                requestAnimationFrame(gameLoop);
+                document.getElementById('pauseBtn').innerHTML = '<i class="fas fa-pause text-gray-700"></i>';
+            }
+        });
+
+        // 初始化
+        resizeCanvas();
 
     </script>
 </body>
